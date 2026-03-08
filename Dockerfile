@@ -10,12 +10,15 @@ RUN pip install --no-cache-dir \
     fastapi \
     uvicorn[standard]
 
-# Copy model code and checkpoint
-COPY model.py serve.py ./
-COPY out-pelagic/ckpt.pt out-pelagic/ckpt.pt
+# Copy model code and server
+COPY model.py serve.py configurator.py ./
+
+# Checkpoint is downloaded at startup via CHECKPOINT_URL env var
+RUN mkdir -p out-pelagic
 
 ENV PELAGIC_DEVICE=cpu
 ENV PELAGIC_CHECKPOINT_DIR=out-pelagic
+# Set CHECKPOINT_URL in Railway to download ckpt.pt at startup
 
 EXPOSE 8000
 

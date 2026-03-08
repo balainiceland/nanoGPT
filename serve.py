@@ -25,6 +25,7 @@ from model import GPTConfig, GPT
 
 # Configuration
 CHECKPOINT_DIR = os.environ.get('PELAGIC_CHECKPOINT_DIR', 'out-pelagic')
+CHECKPOINT_URL = os.environ.get('CHECKPOINT_URL', '')
 DEVICE = os.environ.get('PELAGIC_DEVICE', 'cpu')
 MAX_TOKENS_LIMIT = 500
 
@@ -34,13 +35,42 @@ enc = None
 checkpoint_info = {}
 
 
+def download_checkpoint(url: str, dest: str):
+    """Download checkpoint from URL if not already present."""
+    if os.path.exists(dest):
+        print(f"Checkpoint already exists at {dest}, skipping download.")
+        return
+
+    import urllib.request
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    print(f"Downloading checkpoint from {url}...")
+    print("This may take a few minutes for a 1.4GB file...")
+
+    def progress_hook(block_num, block_size, total_size):
+        downloaded = block_num * block_size
+        if total_size > 0:
+            pct = min(100, downloaded * 100 // total_size)
+            mb = downloaded / (1024 * 1024)
+            total_mb = total_size / (1024 * 1024)
+            if block_num % 500 == 0:
+                print(f"  {mb:.0f}/{total_mb:.0f} MB ({pct}%)")
+
+    urllib.request.urlretrieve(url, dest, reporthook=progress_hook)
+    print(f"Download complete: {os.path.getsize(dest) / (1024*1024):.0f} MB")
+
+
 def load_model():
-    """Load model from checkpoint."""
+    """Load model from checkpoint. Downloads from URL if needed."""
     global model, enc, checkpoint_info
 
     ckpt_path = os.path.join(CHECKPOINT_DIR, 'ckpt.pt')
+
+    # Download from URL if checkpoint doesn't exist locally
+    if not os.path.exists(ckpt_path) and CHECKPOINT_URL:
+        download_checkpoint(CHECKPOINT_URL, ckpt_path)
+
     if not os.path.exists(ckpt_path):
-        print(f"WARNING: No checkpoint at {ckpt_path}. Server will return errors on /generate.")
+        print(f"WARNING: No checkpoint at {ckpt_path}. Set CHECKPOINT_URL to download.")
         return
 
     print(f"Loading checkpoint from {ckpt_path}...")
