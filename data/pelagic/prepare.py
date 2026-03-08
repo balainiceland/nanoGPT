@@ -4,6 +4,7 @@ Prepare blue economy corpus for PelagicGPT fine-tuning.
 Extracts text from:
   1. Supabase tables: news_items, signals, decision_lineage, assistant_sessions
   2. Research markdown files from blue-economy-data/research/
+  3. IOC seafood map: methodology docs, source logs, enriched factory data, citations
 
 Tokenizes with GPT-2 BPE and saves train.bin / val.bin.
 """
@@ -26,6 +27,7 @@ SUPABASE_URL = os.environ.get('VITE_SUPABASE_URL', '')
 SUPABASE_SERVICE_KEY = os.environ.get('SUPABASE_SERVICE_ROLE_KEY', '')
 
 RESEARCH_DIR = BLUE_ECON_ROOT / 'research'
+IOC_ROOT = Path('/Users/Bala_1/dev/ioc-seafood-map')
 OUTPUT_DIR = Path(__file__).parent
 EOT = '<|endoftext|>'
 
@@ -82,7 +84,7 @@ def extract_signals(client) -> list[str]:
     documents = []
     try:
         resp = client.table('signals').select(
-            'name, direction, confidence, rationale, tradeable_instruments'
+            'signal_name, direction, confidence, strength, rationale, tradeable_instruments'
         ).execute()
 
         for item in resp.data or []:
@@ -92,8 +94,8 @@ def extract_signals(client) -> list[str]:
             instruments = ', '.join(item.get('tradeable_instruments') or [])
             text = (
                 f"{EOT}\n[SIGNAL NARRATIVE]\n"
-                f"Signal: {item['name']} | Direction: {item.get('direction', 'neutral')} | "
-                f"Strength: {item.get('confidence', 0)}\n"
+                f"Signal: {item['signal_name']} | Direction: {item.get('direction', 'neutral')} | "
+                f"Strength: {item.get('strength') or item.get('confidence', 0)}\n"
             )
             if instruments:
                 text += f"Instruments: {instruments}\n"
@@ -216,6 +218,136 @@ def extract_research_docs() -> list[str]:
     return documents
 
 
+def extract_ioc_docs() -> list[str]:
+    """Extract methodology docs, source logs, and enriched data from IOC seafood map."""
+    documents = []
+
+    if not IOC_ROOT.exists():
+        print("  WARNING: IOC seafood map not found at", IOC_ROOT)
+        return documents
+
+    # Directories to skip (not domain-relevant content)
+    skip_dirs = {'.venv', 'node_modules', '.git', '__pycache__', 'dist', '.next'}
+
+    def should_skip(path: Path) -> bool:
+        return any(part in skip_dirs for part in path.parts)
+
+    # 1. Methodology and source documentation (markdown files)
+    md_files = [f for f in list(IOC_ROOT.glob('*.md')) + list(IOC_ROOT.glob('**/*source_log*.md'))
+                if not should_skip(f)]
+    for md_file in md_files:
+        try:
+            content = md_file.read_text(encoding='utf-8')
+            if len(content) < 100:
+                continue
+
+            # Chunk at paragraph boundaries
+            paragraphs = content.split('\n\n')
+            chunk = []
+            chunk_len = 0
+
+            for para in paragraphs:
+                para = para.strip()
+                if not para:
+                    continue
+                if chunk_len + len(para) > 2000 and chunk:
+                    text = f"{EOT}\n[MARKET COMMENTARY]\n" + '\n\n'.join(chunk)
+                    documents.append(text)
+                    chunk = []
+                    chunk_len = 0
+                chunk.append(para)
+                chunk_len += len(para)
+
+            if chunk:
+                text = f"{EOT}\n[MARKET COMMENTARY]\n" + '\n\n'.join(chunk)
+                documents.append(text)
+
+            print(f"    {md_file.relative_to(IOC_ROOT)}: {len(content):,} chars")
+        except Exception as e:
+            print(f"    WARNING: Failed to read {md_file.name}: {e}")
+
+    # 2. Enriched factory text files (summaries with species, certifications, confidence)
+    txt_files = [f for f in IOC_ROOT.glob('**/*.txt') if not should_skip(f)]
+    for txt_file in txt_files:
+        try:
+            content = txt_file.read_text(encoding='utf-8', errors='replace')
+            if len(content) < 200:
+                continue
+
+            # Split into factory entries (separated by blank lines or dashes)
+            entries = content.split('\n\n')
+            chunk = []
+            chunk_len = 0
+
+            for entry in entries:
+                entry = entry.strip()
+                if not entry or len(entry) < 30:
+                    continue
+                if chunk_len + len(entry) > 2000 and chunk:
+                    text = f"{EOT}\n[MARKET COMMENTARY]\n" + '\n\n'.join(chunk)
+                    documents.append(text)
+                    chunk = []
+                    chunk_len = 0
+                chunk.append(entry)
+                chunk_len += len(entry)
+
+            if chunk:
+                text = f"{EOT}\n[MARKET COMMENTARY]\n" + '\n\n'.join(chunk)
+                documents.append(text)
+
+            print(f"    {txt_file.relative_to(IOC_ROOT)}: {len(content):,} chars")
+        except Exception as e:
+            print(f"    WARNING: Failed to read {txt_file.name}: {e}")
+
+    # 3. Citation CSV files (evidence snippets with confidence levels)
+    import csv
+    citation_files = [f for f in IOC_ROOT.glob('**/*citations*.csv') if not should_skip(f)]
+    for csv_file in citation_files:
+        try:
+            with open(csv_file, 'r', encoding='utf-8', errors='replace') as f:
+                reader = csv.DictReader(f)
+                batch = []
+                batch_len = 0
+
+                for row in reader:
+                    # Build a natural-language description from citation fields
+                    parts = []
+                    entity = row.get('entity_id') or row.get('entity') or row.get('factory') or ''
+                    field = row.get('field', '')
+                    value = row.get('value', '')
+                    snippet = row.get('evidence_snippet', '')
+                    confidence = row.get('confidence', '')
+
+                    if entity and value:
+                        line = f"{entity}: {field}={value}"
+                        if confidence:
+                            line += f" (confidence: {confidence})"
+                        if snippet:
+                            line += f" — {snippet}"
+                        parts.append(line)
+
+                    if parts:
+                        entry = ' '.join(parts)
+                        if batch_len + len(entry) > 2000 and batch:
+                            text = f"{EOT}\n[MARKET COMMENTARY]\n" + '\n'.join(batch)
+                            documents.append(text)
+                            batch = []
+                            batch_len = 0
+                        batch.append(entry)
+                        batch_len += len(entry)
+
+                if batch:
+                    text = f"{EOT}\n[MARKET COMMENTARY]\n" + '\n'.join(batch)
+                    documents.append(text)
+
+            print(f"    {csv_file.relative_to(IOC_ROOT)}: citations loaded")
+        except Exception as e:
+            print(f"    WARNING: Failed to read {csv_file.name}: {e}")
+
+    print(f"  Extracted {len(documents)} IOC chunks total")
+    return documents
+
+
 def main():
     print("=== PelagicGPT Data Preparation ===\n")
 
@@ -240,6 +372,10 @@ def main():
     # 2. Extract research docs
     print("\nReading research documents...")
     all_documents.extend(extract_research_docs())
+
+    # 3. Extract IOC seafood map data
+    print("\nReading IOC seafood map data...")
+    all_documents.extend(extract_ioc_docs())
 
     if not all_documents:
         print("\nERROR: No documents extracted. Check Supabase credentials and research directory.")

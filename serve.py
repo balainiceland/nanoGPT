@@ -65,7 +65,7 @@ def load_model():
 
     checkpoint_info = {
         'iter_num': checkpoint.get('iter_num', 0),
-        'best_val_loss': round(checkpoint.get('best_val_loss', 0), 4),
+        'best_val_loss': round(float(checkpoint.get('best_val_loss', 0)), 4),
         'n_params': model.get_num_params(),
         'n_layer': gptconf.n_layer,
         'n_head': gptconf.n_head,
