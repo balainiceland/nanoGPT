@@ -177,7 +177,7 @@ class GenerateRequest(BaseModel):
     prompt: str = Field(..., min_length=1, max_length=2000)
     mode: str = Field(
         default='freeform',
-        description='Generation mode: market_commentary, signal_narrative, price_analysis, freeform'
+        description='Generation mode: market_commentary, signal_narrative, price_analysis, vessel_intelligence, freeform'
     )
     temperature: float = Field(default=0.7, ge=0.1, le=2.0)
     top_k: int = Field(default=200, ge=1, le=500)
@@ -204,6 +204,7 @@ MODE_TAGS = {
     'market_commentary': '[MARKET COMMENTARY]',
     'signal_narrative': '[SIGNAL NARRATIVE]',
     'price_analysis': '[PRICE ANALYSIS]',
+    'vessel_intelligence': '[VESSEL INTELLIGENCE]',
     'freeform': '',
 }
 

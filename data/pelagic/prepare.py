@@ -176,6 +176,173 @@ def extract_sessions(client) -> list[str]:
     return documents
 
 
+def extract_vessels(client) -> list[str]:
+    """Extract vessel registry and fleet intelligence."""
+    if not client:
+        return []
+
+    documents = []
+    try:
+        resp = client.table('vessels').select(
+            'name, mmsi, imo, flag_country, vessel_type, length_m, tonnage_gt, '
+            'target_species, owner, is_active'
+        ).eq('is_active', True).order('name').execute()
+
+        # Group vessels by flag country for fleet summaries
+        by_flag: dict[str, list] = {}
+        for v in resp.data or []:
+            flag = v.get('flag_country') or 'Unknown'
+            by_flag.setdefault(flag, []).append(v)
+
+        # Individual vessel profiles
+        for v in resp.data or []:
+            species = ', '.join(v.get('target_species') or [])
+            parts = [f"Vessel: {v.get('name', 'Unknown')}"]
+            if v.get('mmsi'):
+                parts.append(f"MMSI: {v['mmsi']}")
+            if v.get('flag_country'):
+                parts.append(f"Flag: {v['flag_country']}")
+            if v.get('vessel_type'):
+                parts.append(f"Type: {v['vessel_type']}")
+            if v.get('length_m'):
+                parts.append(f"Length: {v['length_m']}m")
+            if v.get('tonnage_gt'):
+                parts.append(f"Tonnage: {v['tonnage_gt']} GT")
+            if species:
+                parts.append(f"Target species: {species}")
+            if v.get('owner'):
+                parts.append(f"Owner: {v['owner']}")
+
+            text = f"{EOT}\n[VESSEL INTELLIGENCE]\n" + ' | '.join(parts)
+            documents.append(text)
+
+        # Fleet summaries by flag
+        for flag, vessels in by_flag.items():
+            if len(vessels) < 2:
+                continue
+            types = {}
+            for v in vessels:
+                vt = v.get('vessel_type') or 'unknown'
+                types[vt] = types.get(vt, 0) + 1
+
+            type_str = ', '.join(f"{count} {t}" for t, count in sorted(types.items(), key=lambda x: -x[1]))
+            text = (
+                f"{EOT}\n[VESSEL INTELLIGENCE]\n"
+                f"Fleet summary for {flag}: {len(vessels)} active vessels. "
+                f"Composition: {type_str}."
+            )
+            documents.append(text)
+
+        print(f"  Extracted {len(documents)} vessel records")
+    except Exception as e:
+        print(f"  WARNING: Failed to extract vessels: {e}")
+
+    return documents
+
+
+def extract_vessel_events(client) -> list[str]:
+    """Extract vessel events (fishing, port visits, encounters, loitering, AIS gaps)."""
+    if not client:
+        return []
+
+    documents = []
+    try:
+        resp = client.table('vessel_events').select(
+            'event_type, start_time, end_time, duration_hours, lat, lon, '
+            'region_name, port_name, port_flag, encountered_vessel_mmsi, '
+            'gap_hours, vessel_mmsi'
+        ).order('start_time', desc=True).limit(2000).execute()
+
+        EVENT_DESCRIPTIONS = {
+            'fishing': 'fishing activity detected',
+            'port_visit': 'port visit recorded',
+            'encounter': 'at-sea encounter with another vessel',
+            'loitering': 'loitering behavior detected',
+            'ais_gap': 'AIS transponder gap detected',
+        }
+
+        batch = []
+        batch_len = 0
+
+        for ev in resp.data or []:
+            etype = ev.get('event_type', 'unknown')
+            desc = EVENT_DESCRIPTIONS.get(etype, etype)
+            parts = [f"Event: {desc}"]
+
+            if ev.get('vessel_mmsi'):
+                parts.append(f"Vessel MMSI: {ev['vessel_mmsi']}")
+            if ev.get('region_name'):
+                parts.append(f"Region: {ev['region_name']}")
+            if ev.get('start_time'):
+                parts.append(f"Time: {ev['start_time'][:10]}")
+            if ev.get('duration_hours'):
+                parts.append(f"Duration: {ev['duration_hours']:.1f}h")
+            if ev.get('port_name'):
+                parts.append(f"Port: {ev['port_name']} ({ev.get('port_flag', '')})")
+            if ev.get('encountered_vessel_mmsi'):
+                parts.append(f"Encountered vessel: {ev['encountered_vessel_mmsi']}")
+            if ev.get('gap_hours'):
+                parts.append(f"AIS gap: {ev['gap_hours']:.1f}h")
+
+            entry = ' | '.join(parts)
+            if batch_len + len(entry) > 2000 and batch:
+                text = f"{EOT}\n[VESSEL INTELLIGENCE]\n" + '\n'.join(batch)
+                documents.append(text)
+                batch = []
+                batch_len = 0
+            batch.append(entry)
+            batch_len += len(entry)
+
+        if batch:
+            text = f"{EOT}\n[VESSEL INTELLIGENCE]\n" + '\n'.join(batch)
+            documents.append(text)
+
+        print(f"  Extracted {len(documents)} vessel event chunks")
+    except Exception as e:
+        print(f"  WARNING: Failed to extract vessel events: {e}")
+
+    return documents
+
+
+def extract_fishing_effort(client) -> list[str]:
+    """Extract aggregated fishing effort data."""
+    if not client:
+        return []
+
+    documents = []
+    try:
+        resp = client.table('fishing_effort').select(
+            'region_name, date, fishing_hours, total_hours, distance_km, avg_speed_knots'
+        ).order('date', desc=True).limit(2000).execute()
+
+        # Group by region for narrative summaries
+        by_region: dict[str, list] = {}
+        for row in resp.data or []:
+            region = row.get('region_name') or 'Unknown'
+            by_region.setdefault(region, []).append(row)
+
+        for region, rows in by_region.items():
+            total_fishing = sum(r.get('fishing_hours', 0) or 0 for r in rows)
+            total_distance = sum(r.get('distance_km', 0) or 0 for r in rows)
+            avg_speed = sum(r.get('avg_speed_knots', 0) or 0 for r in rows) / max(len(rows), 1)
+            days = len(rows)
+
+            text = (
+                f"{EOT}\n[VESSEL INTELLIGENCE]\n"
+                f"Fishing effort summary for {region}: "
+                f"{total_fishing:.0f} fishing hours over {days} vessel-days, "
+                f"{total_distance:.0f} km covered, "
+                f"average speed {avg_speed:.1f} knots."
+            )
+            documents.append(text)
+
+        print(f"  Extracted {len(documents)} fishing effort summaries")
+    except Exception as e:
+        print(f"  WARNING: Failed to extract fishing effort: {e}")
+
+    return documents
+
+
 def extract_research_docs() -> list[str]:
     """Read research markdown files."""
     documents = []
@@ -369,7 +536,17 @@ def main():
     print("Extracting session transcripts...")
     all_documents.extend(extract_sessions(client))
 
-    # 2. Extract research docs
+    # 2. Extract vessel data
+    print("\nExtracting vessel registry...")
+    all_documents.extend(extract_vessels(client))
+
+    print("Extracting vessel events...")
+    all_documents.extend(extract_vessel_events(client))
+
+    print("Extracting fishing effort...")
+    all_documents.extend(extract_fishing_effort(client))
+
+    # 3. Extract research docs
     print("\nReading research documents...")
     all_documents.extend(extract_research_docs())
 

@@ -57,6 +57,25 @@ COMPANIES = [
     ('AKBM', 'Aker BioMarine', 'Antarctic krill harvester'),
 ]
 
+VESSEL_SCENARIOS = [
+    ('ais_gap_dark_fishing', 'Fleet of trawlers going dark in exclusive economic zone, potential IUU fishing activity'),
+    ('port_congestion', 'Major fishing port experiencing vessel congestion, delaying landings and affecting fresh market supply'),
+    ('fleet_repositioning', 'Purse seine fleet repositioning from Atlantic to Indian Ocean following tuna migration patterns'),
+    ('encounter_transshipment', 'At-sea encounters between fishing vessels and reefer carriers suggesting transshipment activity'),
+    ('effort_surge', 'Sudden increase in fishing effort in quota-managed zone, potential race-to-fish before season closure'),
+    ('loitering_bunkering', 'Carrier vessels loitering at known bunkering locations, indicating fleet operational patterns'),
+    ('fleet_composition_shift', 'Change in vessel type composition in key fishing ground, signaling species targeting shift'),
+    ('ais_coverage_anomaly', 'AIS reception anomaly in remote fishing area, complicating catch monitoring and verification'),
+]
+
+VESSEL_INTELLIGENCE_PROMPT = """Generate 5 realistic vessel intelligence analysis paragraphs about: "{scenario_name}".
+Scenario: {description}
+Each should be 80-150 words, written as a maritime intelligence analyst for a seafood-focused hedge fund.
+Cover: vessel tracking data (AIS/VMS), fleet behavior patterns, fishing effort metrics,
+regulatory implications (IUU, quota compliance), and market impact on seafood supply/prices.
+Use specific but plausible details (vessel counts, coordinates, hours, regions like FAO areas).
+Separate each paragraph with a blank line. Do NOT number them."""
+
 MARKET_COMMENTARY_PROMPT = """Generate 5 realistic blue economy market commentary paragraphs about {commodity}.
 Each should be 80-150 words, written in the style of a hedge fund market analyst.
 Cover themes like: price movements, supply/demand dynamics, seasonal patterns,
@@ -124,7 +143,17 @@ def main():
         print(f"  {commodity}: {len(paragraphs)} paragraphs")
         time.sleep(0.5)  # Rate limit
 
-    # 2. Signal narratives
+    # 2. Vessel intelligence
+    print("\nGenerating vessel intelligence...")
+    for scenario_name, description in VESSEL_SCENARIOS:
+        prompt = VESSEL_INTELLIGENCE_PROMPT.format(scenario_name=scenario_name, description=description)
+        paragraphs = generate_texts(client, prompt)
+        for p in paragraphs:
+            all_texts.append(f"{EOT}\n[VESSEL INTELLIGENCE]\nScenario: {scenario_name}\n{p}")
+        print(f"  {scenario_name}: {len(paragraphs)} paragraphs")
+        time.sleep(0.5)
+
+    # 3. Signal narratives
     print("\nGenerating signal narratives...")
     for signal_name, description in SIGNAL_TYPES:
         prompt = SIGNAL_NARRATIVE_PROMPT.format(signal_name=signal_name, description=description)
@@ -134,7 +163,7 @@ def main():
         print(f"  {signal_name}: {len(paragraphs)} paragraphs")
         time.sleep(0.5)
 
-    # 3. Price analysis per company
+    # 4. Price analysis per company
     print("\nGenerating price analysis...")
     for ticker, name, profile in COMPANIES:
         prompt = PRICE_ANALYSIS_PROMPT.format(ticker=ticker, company_name=name, profile=profile)
@@ -144,12 +173,12 @@ def main():
         print(f"  {ticker}: {len(paragraphs)} paragraphs")
         time.sleep(0.5)
 
-    # 4. Save augmented corpus
+    # 5. Save augmented corpus
     corpus = '\n'.join(all_texts) + f'\n{EOT}\n'
     AUGMENTED_FILE.write_text(corpus, encoding='utf-8')
     print(f"\nSaved {len(all_texts)} augmented documents to {AUGMENTED_FILE.name}")
 
-    # 5. Combine with existing corpus and re-tokenize
+    # 6. Combine with existing corpus and re-tokenize
     print("\nRe-tokenizing combined corpus...")
     existing_train = OUTPUT_DIR / 'train.bin'
     existing_val = OUTPUT_DIR / 'val.bin'
@@ -170,7 +199,7 @@ def main():
         combined = np.array(augmented_tokens, dtype=np.uint16)
         print(f"No existing data found. Using augmented data only.")
 
-    # 6. Re-split and save
+    # 7. Re-split and save
     n = len(combined)
     split_idx = int(n * 0.9)
     train_ids = combined[:split_idx]

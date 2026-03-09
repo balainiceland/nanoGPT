@@ -4,7 +4,7 @@ Fine-tune GPT-2 124M on blue economy corpus for PelagicGPT.
 Usage:
   python train.py config/finetune_pelagic.py
 
-Estimated: ~30-60 min on MacBook MPS, ~500MB checkpoint.
+Estimated: ~2-3 hours on MacBook MPS, ~500MB checkpoint.
 """
 
 import time
@@ -26,16 +26,19 @@ always_save_checkpoint = False
 
 # Batch sizing:
 # 1 batch_size * 32 grad_accum * 1024 block_size = 32,768 tokens/iter
-# With ~2M tokens corpus, 1 epoch ≈ 61 iters
-# 300 iters ≈ ~5 epochs
+# With ~4.4M tokens corpus, 1 epoch ≈ 134 iters
+# 800 iters ≈ ~6 epochs
 batch_size = 1
 gradient_accumulation_steps = 32
 block_size = 1024
-max_iters = 300
+max_iters = 800
 
 # Fine-tuning LR (low to preserve pretrained weights)
 learning_rate = 3e-5
-decay_lr = False  # Constant LR for fine-tuning
+warmup_iters = 50
+decay_lr = True
+lr_decay_iters = 800
+min_lr = 3e-6  # 10x decay by end
 
 # Regularization
 dropout = 0.1
