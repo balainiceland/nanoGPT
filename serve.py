@@ -12,7 +12,9 @@ Endpoints:
 """
 
 import os
+import sys
 import time
+import logging
 from contextlib import asynccontextmanager
 
 import torch
@@ -22,6 +24,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from model import GPTConfig, GPT
+
+# Force unbuffered output for Railway logs
+logging.basicConfig(level=logging.INFO, stream=sys.stdout, force=True)
+logger = logging.getLogger("pelagic-gpt")
 
 # Configuration
 CHECKPOINT_DIR = os.environ.get('PELAGIC_CHECKPOINT_DIR', 'out-pelagic')
@@ -38,13 +44,14 @@ checkpoint_info = {}
 def download_checkpoint(url: str, dest: str):
     """Download checkpoint from URL if not already present."""
     if os.path.exists(dest):
-        print(f"Checkpoint already exists at {dest}, skipping download.")
+        logger.info(f"Checkpoint already exists at {dest}, skipping download.")
         return
 
     import urllib.request
     os.makedirs(os.path.dirname(dest), exist_ok=True)
-    print(f"Downloading checkpoint from {url}...")
-    print("This may take a few minutes for a 1.4GB file...")
+    logger.info(f"Downloading checkpoint from {url}")
+    logger.info("This may take a few minutes for a 1.4GB file...")
+    sys.stdout.flush()
 
     def progress_hook(block_num, block_size, total_size):
         downloaded = block_num * block_size
@@ -52,11 +59,12 @@ def download_checkpoint(url: str, dest: str):
             pct = min(100, downloaded * 100 // total_size)
             mb = downloaded / (1024 * 1024)
             total_mb = total_size / (1024 * 1024)
-            if block_num % 500 == 0:
-                print(f"  {mb:.0f}/{total_mb:.0f} MB ({pct}%)")
+            if block_num % 2000 == 0:
+                logger.info(f"  {mb:.0f}/{total_mb:.0f} MB ({pct}%)")
+                sys.stdout.flush()
 
     urllib.request.urlretrieve(url, dest, reporthook=progress_hook)
-    print(f"Download complete: {os.path.getsize(dest) / (1024*1024):.0f} MB")
+    logger.info(f"Download complete: {os.path.getsize(dest) / (1024*1024):.0f} MB")
 
 
 def load_model():
@@ -70,10 +78,11 @@ def load_model():
         download_checkpoint(CHECKPOINT_URL, ckpt_path)
 
     if not os.path.exists(ckpt_path):
-        print(f"WARNING: No checkpoint at {ckpt_path}. Set CHECKPOINT_URL to download.")
+        logger.warning(f"No checkpoint at {ckpt_path}. Set CHECKPOINT_URL env var to download.")
+        logger.warning(f"CHECKPOINT_URL is currently: '{CHECKPOINT_URL}'")
         return
 
-    print(f"Loading checkpoint from {ckpt_path}...")
+    logger.info(f"Loading checkpoint from {ckpt_path}...")
     checkpoint = torch.load(ckpt_path, map_location=DEVICE, weights_only=False)
 
     gptconf = GPTConfig(**checkpoint['model_args'])
@@ -105,9 +114,9 @@ def load_model():
         'checkpoint_size_mb': round(os.path.getsize(ckpt_path) / (1024 * 1024), 1),
     }
 
-    print(f"Model loaded: {checkpoint_info['n_params']:,} params, "
-          f"val_loss={checkpoint_info['best_val_loss']}, "
-          f"iter={checkpoint_info['iter_num']}")
+    logger.info(f"Model loaded: {checkpoint_info['n_params']:,} params, "
+               f"val_loss={checkpoint_info['best_val_loss']}, "
+               f"iter={checkpoint_info['iter_num']}")
 
 
 @asynccontextmanager
