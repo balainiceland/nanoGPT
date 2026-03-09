@@ -75,7 +75,14 @@ def load_model():
 
     # Download from URL if checkpoint doesn't exist locally
     if not os.path.exists(ckpt_path) and CHECKPOINT_URL:
+        # Use the filename from the URL, but save as ckpt.pt
         download_checkpoint(CHECKPOINT_URL, ckpt_path)
+
+    # Also check for ckpt_slim.pt as fallback
+    if not os.path.exists(ckpt_path):
+        slim_path = os.path.join(CHECKPOINT_DIR, 'ckpt_slim.pt')
+        if os.path.exists(slim_path):
+            ckpt_path = slim_path
 
     if not os.path.exists(ckpt_path):
         logger.warning(f"No checkpoint at {ckpt_path}. Set CHECKPOINT_URL env var to download.")
