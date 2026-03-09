@@ -126,9 +126,26 @@ def load_model():
                f"iter={checkpoint_info['iter_num']}")
 
 
+import threading
+
+model_loading = False
+
+def load_model_background():
+    """Load model in background thread so server starts immediately."""
+    global model_loading
+    model_loading = True
+    try:
+        load_model()
+    except Exception as e:
+        logger.error(f"Failed to load model: {e}")
+    finally:
+        model_loading = False
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    load_model()
+    # Start model loading in background so health checks pass immediately
+    thread = threading.Thread(target=load_model_background, daemon=True)
+    thread.start()
     yield
 
 
@@ -193,8 +210,14 @@ MODE_TAGS = {
 
 @app.get('/health', response_model=HealthResponse)
 async def health():
+    if model_loading:
+        status = 'loading'
+    elif model is not None:
+        status = 'ok'
+    else:
+        status = 'no_model'
     return HealthResponse(
-        status='ok' if model is not None else 'no_model',
+        status=status,
         model_loaded=model is not None,
         model_info=checkpoint_info,
     )
@@ -203,10 +226,8 @@ async def health():
 @app.post('/generate', response_model=GenerateResponse)
 async def generate(req: GenerateRequest):
     if model is None:
-        raise HTTPException(
-            status_code=503,
-            detail='Model not loaded. Place checkpoint at out-pelagic/ckpt.pt and restart.'
-        )
+        detail = 'Model is loading, please wait...' if model_loading else 'Model not loaded. Set CHECKPOINT_URL and restart.'
+        raise HTTPException(status_code=503, detail=detail)
 
     # Prepend mode tag
     tag = MODE_TAGS.get(req.mode, '')
