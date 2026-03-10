@@ -273,6 +273,33 @@ def _rag_available() -> bool:
     )
 
 
+@app.get('/debug/connectivity')
+async def debug_connectivity():
+    """Test connectivity to external APIs."""
+    import httpx
+    results = {}
+    for name, url in [
+        ('anthropic', 'https://api.anthropic.com'),
+        ('openai', 'https://api.openai.com'),
+        ('supabase', os.environ.get('VITE_SUPABASE_URL', '')),
+    ]:
+        try:
+            async with httpx.AsyncClient(timeout=5) as client:
+                r = await client.get(url)
+                results[name] = {'status': r.status_code, 'ok': True}
+        except Exception as e:
+            results[name] = {'error': f"{type(e).__name__}: {e}", 'ok': False}
+
+    # Also check anthropic package version
+    try:
+        import anthropic
+        results['anthropic_sdk_version'] = anthropic.__version__
+    except Exception:
+        results['anthropic_sdk_version'] = 'unknown'
+
+    return results
+
+
 @app.get('/health', response_model=HealthResponse)
 async def health():
     if model_loading:
