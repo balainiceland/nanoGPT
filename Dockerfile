@@ -27,6 +27,7 @@ ENV PYTHONUNBUFFERED=1
 ENV PELAGIC_DEVICE=cpu
 ENV PELAGIC_CHECKPOINT_DIR=out-pelagic
 # Set CHECKPOINT_URL in Railway to download ckpt.pt at startup
+# RAG requires: VITE_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY
 
 # Run as non-root user
 USER appuser
