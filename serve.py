@@ -184,6 +184,24 @@ class GenerateRequest(BaseModel):
     max_tokens: int = Field(default=200, ge=10, le=500)
 
 
+class AskRequest(BaseModel):
+    question: str = Field(..., min_length=1, max_length=2000)
+    top_k: int = Field(default=8, ge=1, le=20)
+    source_filter: str | None = Field(
+        default=None,
+        description='Filter by source: financial, company, news, signal, quota, annual_report'
+    )
+    max_tokens: int = Field(default=1000, ge=100, le=4000)
+
+
+class AskResponse(BaseModel):
+    answer: str
+    sources: list[dict]
+    chunks_used: int
+    model: str
+    query_time_ms: int
+
+
 class GenerateResponse(BaseModel):
     text: str
     tokens_generated: int
@@ -196,6 +214,7 @@ class HealthResponse(BaseModel):
     status: str
     model_loaded: bool
     model_info: dict
+    rag_available: bool
 
 
 # === Mode Tags ===
@@ -211,6 +230,16 @@ MODE_TAGS = {
 
 # === Endpoints ===
 
+def _rag_available() -> bool:
+    """Check if RAG dependencies are configured."""
+    return bool(
+        os.environ.get('VITE_SUPABASE_URL')
+        and os.environ.get('SUPABASE_SERVICE_ROLE_KEY')
+        and os.environ.get('OPENAI_API_KEY')
+        and os.environ.get('ANTHROPIC_API_KEY')
+    )
+
+
 @app.get('/health', response_model=HealthResponse)
 async def health():
     if model_loading:
@@ -223,6 +252,36 @@ async def health():
         status=status,
         model_loaded=model is not None,
         model_info=checkpoint_info,
+        rag_available=_rag_available(),
+    )
+
+
+@app.post('/ask', response_model=AskResponse)
+async def ask(req: AskRequest):
+    """RAG endpoint: retrieves relevant data and generates a grounded answer using Claude."""
+    if not _rag_available():
+        raise HTTPException(
+            status_code=503,
+            detail='RAG not configured. Set VITE_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY.'
+        )
+
+    import rag
+
+    start_time = time.time()
+    result = rag.ask(
+        query=req.question,
+        top_k=req.top_k,
+        source_filter=req.source_filter,
+        max_tokens=req.max_tokens,
+    )
+    elapsed_ms = int((time.time() - start_time) * 1000)
+
+    return AskResponse(
+        answer=result['answer'],
+        sources=result['sources'],
+        chunks_used=result['chunks_used'],
+        model=result['model'],
+        query_time_ms=elapsed_ms,
     )
 
 

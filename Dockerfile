@@ -9,10 +9,13 @@ RUN pip install --no-cache-dir \
     numpy \
     tiktoken \
     fastapi \
-    uvicorn[standard]
+    uvicorn[standard] \
+    openai \
+    anthropic \
+    supabase
 
 # Copy model code and server
-COPY model.py serve.py configurator.py ./
+COPY model.py serve.py configurator.py rag.py ./
 
 # Checkpoint is downloaded at startup via CHECKPOINT_URL env var
 RUN mkdir -p out-pelagic
