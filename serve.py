@@ -14,16 +14,32 @@ Endpoints:
 import os
 import sys
 import time
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
 import torch
 import tiktoken
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Security
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
 
 from model import GPTConfig, GPT
+
+# API key authentication
+API_KEY = os.environ.get('API_KEY', '')
+api_key_header = APIKeyHeader(name='X-API-Key', auto_error=False)
+
+
+async def verify_api_key(api_key: str = Security(api_key_header)):
+    """Verify the API key from the X-API-Key header."""
+    if not API_KEY:
+        # If no API_KEY is configured, skip auth (development mode)
+        return api_key
+    if not api_key or api_key != API_KEY:
+        raise HTTPException(status_code=401, detail='Invalid or missing API key')
+    return api_key
 
 # Force unbuffered output for Railway logs
 logging.basicConfig(level=logging.INFO, stream=sys.stdout, force=True)
@@ -41,11 +57,29 @@ enc = None
 checkpoint_info = {}
 
 
+TRUSTED_DOMAINS = {'huggingface.co', 'github.com', 'railway.app', 'cdn.openai.com'}
+
+
+def _validate_checkpoint_url(url: str):
+    """Validate that URL is HTTPS and from a trusted domain to prevent SSRF."""
+    from urllib.parse import urlparse
+    parsed = urlparse(url)
+    if parsed.scheme != 'https':
+        raise ValueError(f"Only HTTPS URLs are allowed, got: {parsed.scheme}")
+    hostname = parsed.hostname or ''
+    if not any(hostname == domain or hostname.endswith('.' + domain) for domain in TRUSTED_DOMAINS):
+        raise ValueError(
+            f"Untrusted domain: {hostname}. Allowed: {', '.join(sorted(TRUSTED_DOMAINS))}"
+        )
+
+
 def download_checkpoint(url: str, dest: str):
     """Download checkpoint from URL if not already present."""
     if os.path.exists(dest):
         logger.info(f"Checkpoint already exists at {dest}, skipping download.")
         return
+
+    _validate_checkpoint_url(url)
 
     import urllib.request
     os.makedirs(os.path.dirname(dest), exist_ok=True)
@@ -213,7 +247,6 @@ class GenerateResponse(BaseModel):
 class HealthResponse(BaseModel):
     status: str
     model_loaded: bool
-    model_info: dict
     rag_available: bool
 
 
@@ -251,13 +284,12 @@ async def health():
     return HealthResponse(
         status=status,
         model_loaded=model is not None,
-        model_info=checkpoint_info,
         rag_available=_rag_available(),
     )
 
 
 @app.post('/ask', response_model=AskResponse)
-async def ask(req: AskRequest):
+async def ask(req: AskRequest, _key: str = Security(verify_api_key)):
     """RAG endpoint: retrieves relevant data and generates a grounded answer using Claude."""
     if not _rag_available():
         raise HTTPException(
@@ -286,7 +318,7 @@ async def ask(req: AskRequest):
 
 
 @app.post('/generate', response_model=GenerateResponse)
-async def generate(req: GenerateRequest):
+async def generate(req: GenerateRequest, _key: str = Security(verify_api_key)):
     if model is None:
         detail = 'Model is loading, please wait...' if model_loading else 'Model not loaded. Set CHECKPOINT_URL and restart.'
         raise HTTPException(status_code=503, detail=detail)
@@ -305,10 +337,15 @@ async def generate(req: GenerateRequest):
 
     x = torch.tensor([token_ids], dtype=torch.long, device=DEVICE)
 
-    # Generate
+    # Generate (run in thread to avoid blocking the async event loop)
+    eot_token = enc.encode("<|endoftext|>", allowed_special={"<|endoftext|>"})[0]
+
+    def _generate():
+        with torch.no_grad():
+            return model.generate(x, req.max_tokens, temperature=req.temperature, top_k=req.top_k, eot_token=eot_token)
+
     start_time = time.time()
-    with torch.no_grad():
-        y = model.generate(x, req.max_tokens, temperature=req.temperature, top_k=req.top_k)
+    y = await asyncio.to_thread(_generate)
 
     elapsed_ms = int((time.time() - start_time) * 1000)
 

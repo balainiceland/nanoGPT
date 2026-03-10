@@ -16,10 +16,21 @@ echo "Step 1: Preparing data..."
 python data/pelagic/prepare.py
 
 # 2. Resume training for 50 more iterations
-echo "Step 2: Training (resume, 50 iters)..."
+# Read current iter from checkpoint to compute absolute max_iters
+CURRENT_ITER=$(python -c "
+import torch, os
+ckpt = os.path.join('out-pelagic', 'ckpt.pt')
+if os.path.exists(ckpt):
+    d = torch.load(ckpt, map_location='cpu', weights_only=False)
+    print(d.get('iter_num', 0))
+else:
+    print(0)
+" 2>/dev/null || echo 0)
+TARGET_ITERS=$((CURRENT_ITER + 50))
+echo "Step 2: Training (resume from iter $CURRENT_ITER, target $TARGET_ITERS)..."
 python train.py config/finetune_pelagic.py \
     --init_from=resume \
-    --max_iters=50
+    --max_iters=$TARGET_ITERS
 
 # 3. Restart serve.py if running
 echo "Step 3: Restarting server..."

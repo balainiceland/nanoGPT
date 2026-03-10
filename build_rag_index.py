@@ -19,12 +19,13 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-# Load env from blue-economy-data
-BLUE_ECON_ROOT = Path('/Users/Bala_1/dev/blue-economy-data')
+# Load env from blue-economy-data (use env var or relative path)
+BLUE_ECON_ROOT = Path(os.environ.get('BLUE_ECON_ROOT', Path(__file__).resolve().parent.parent / 'blue-economy-data'))
 load_dotenv(BLUE_ECON_ROOT / '.env')
 
 # Also load agent-playground env for OpenAI key
-load_dotenv(Path('/Users/Bala_1/dev/agent-playground/.env'))
+AGENT_PLAYGROUND_ROOT = Path(os.environ.get('AGENT_PLAYGROUND_ROOT', Path(__file__).resolve().parent.parent / 'agent-playground'))
+load_dotenv(AGENT_PLAYGROUND_ROOT / '.env')
 
 SUPABASE_URL = os.environ.get('VITE_SUPABASE_URL', '')
 SUPABASE_KEY = os.environ.get('SUPABASE_SERVICE_ROLE_KEY', '')

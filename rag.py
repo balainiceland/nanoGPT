@@ -17,6 +17,30 @@ ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY', '')
 EMBEDDING_MODEL = 'text-embedding-3-small'
 TOP_K = 8
 
+# Prompt injection mitigation patterns
+import re
+_INJECTION_PATTERNS = re.compile(
+    r'^\s*('
+    r'(system\s*:)|(instruction\s*:)|(you\s+are\b)|(ignore\s+(all\s+)?previous)|(forget\s+(all\s+)?previous)|'
+    r'(disregard\s+(all\s+)?previous)|(override\s+(all\s+)?previous)|(new\s+instructions?\s*:)|'
+    r'(SYSTEM\s*:)|(INSTRUCTION\s*:)|(###\s*system)|(###\s*instruction)|'
+    r'(\[SYSTEM\])|(\\n\\nsystem)'
+    r')',
+    re.IGNORECASE | re.MULTILINE
+)
+
+
+def sanitize_query(query: str) -> str:
+    """Sanitize user query to mitigate prompt injection attempts."""
+    # Strip system/instruction-like prefixes
+    cleaned = _INJECTION_PATTERNS.sub('', query).strip()
+    # Remove any remaining leading special characters that might be used for injection
+    cleaned = cleaned.lstrip('#[]<>')
+    # If sanitization removed everything, return a safe default
+    if not cleaned:
+        return "general market overview"
+    return cleaned
+
 # System prompt for Claude RAG generation
 SYSTEM_PROMPT = """You are PelagicGPT, an AI analyst specializing in the blue economy —
 seafood, aquaculture, ocean technology, marine biotech, and related industries.
@@ -123,7 +147,10 @@ Answer based on the retrieved context above:"""
 
 
 def ask(query: str, top_k: int = TOP_K, source_filter: str = None, max_tokens: int = 1000) -> dict:
-    """Full RAG pipeline: embed → retrieve → generate."""
+    """Full RAG pipeline: sanitize → embed → retrieve → generate."""
+    # 0. Sanitize query to mitigate prompt injection
+    query = sanitize_query(query)
+
     # 1. Retrieve relevant chunks
     chunks = retrieve_chunks(query, top_k=top_k, source_filter=source_filter)
 

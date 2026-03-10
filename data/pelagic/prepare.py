@@ -19,15 +19,15 @@ import numpy as np
 import tiktoken
 from dotenv import load_dotenv
 
-# Load .env from blue-economy-data project
-BLUE_ECON_ROOT = Path('/Users/Bala_1/dev/blue-economy-data')
+# Load .env from blue-economy-data project (use env var or relative path)
+BLUE_ECON_ROOT = Path(os.environ.get('BLUE_ECON_ROOT', Path(__file__).resolve().parents[3] / 'blue-economy-data'))
 load_dotenv(BLUE_ECON_ROOT / '.env')
 
 SUPABASE_URL = os.environ.get('VITE_SUPABASE_URL', '')
 SUPABASE_SERVICE_KEY = os.environ.get('SUPABASE_SERVICE_ROLE_KEY', '')
 
 RESEARCH_DIR = BLUE_ECON_ROOT / 'research'
-IOC_ROOT = Path('/Users/Bala_1/dev/ioc-seafood-map')
+IOC_ROOT = Path(os.environ.get('IOC_ROOT', Path(__file__).resolve().parents[3] / 'ioc-seafood-map'))
 OUTPUT_DIR = Path(__file__).parent
 EOT = '<|endoftext|>'
 

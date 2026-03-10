@@ -14,17 +14,23 @@ RUN pip install --no-cache-dir \
     anthropic \
     supabase
 
+# Create non-root user
+RUN groupadd -r appuser && useradd -r -g appuser -d /app -s /sbin/nologin appuser
+
 # Copy model code and server
 COPY model.py serve.py configurator.py rag.py ./
 
 # Checkpoint is downloaded at startup via CHECKPOINT_URL env var
-RUN mkdir -p out-pelagic
+RUN mkdir -p out-pelagic && chown -R appuser:appuser /app
 
 ENV PYTHONUNBUFFERED=1
 ENV PELAGIC_DEVICE=cpu
 ENV PELAGIC_CHECKPOINT_DIR=out-pelagic
 # Set CHECKPOINT_URL in Railway to download ckpt.pt at startup
 
+# Run as non-root user
+USER appuser
+
 EXPOSE 8000
 
-CMD uvicorn serve:app --host 0.0.0.0 --port ${PORT:-8000}
+CMD ["sh", "-c", "exec uvicorn serve:app --host 0.0.0.0 --port ${PORT:-8000}"]
