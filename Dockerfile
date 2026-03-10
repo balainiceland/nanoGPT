@@ -2,17 +2,15 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install PyTorch CPU-only (~200MB) + dependencies
-RUN pip install --no-cache-dir \
-    torch --index-url https://download.pytorch.org/whl/cpu \
-    && pip install --no-cache-dir \
-    numpy \
-    tiktoken \
-    fastapi \
-    uvicorn[standard] \
-    openai \
-    anthropic \
-    supabase
+# Copy requirements first for Docker layer caching
+COPY requirements.txt .
+
+# Install dependencies — split into two layers for better caching
+# Layer 1: PyTorch CPU-only (largest dep, changes least)
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+
+# Layer 2: Everything else (smaller, faster)
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Create non-root user
 RUN groupadd -r appuser && useradd -r -g appuser -d /app -s /sbin/nologin appuser

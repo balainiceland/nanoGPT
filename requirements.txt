@@ -1,0 +1,10 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch
+numpy
+tiktoken
+fastapi
+uvicorn[standard]
+openai
+anthropic
+supabase
+httpx
