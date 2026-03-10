@@ -299,22 +299,26 @@ async def ask(req: AskRequest, _key: str = Security(verify_api_key)):
 
     import rag
 
-    start_time = time.time()
-    result = rag.ask(
-        query=req.question,
-        top_k=req.top_k,
-        source_filter=req.source_filter,
-        max_tokens=req.max_tokens,
-    )
-    elapsed_ms = int((time.time() - start_time) * 1000)
+    try:
+        start_time = time.time()
+        result = rag.ask(
+            query=req.question,
+            top_k=req.top_k,
+            source_filter=req.source_filter,
+            max_tokens=req.max_tokens,
+        )
+        elapsed_ms = int((time.time() - start_time) * 1000)
 
-    return AskResponse(
-        answer=result['answer'],
-        sources=result['sources'],
-        chunks_used=result['chunks_used'],
-        model=result['model'],
-        query_time_ms=elapsed_ms,
-    )
+        return AskResponse(
+            answer=result['answer'],
+            sources=result['sources'],
+            chunks_used=result['chunks_used'],
+            model=result['model'],
+            query_time_ms=elapsed_ms,
+        )
+    except Exception as e:
+        logger.error(f"RAG /ask error: {type(e).__name__}: {e}")
+        raise HTTPException(status_code=500, detail=f"RAG error: {type(e).__name__}: {e}")
 
 
 @app.post('/generate', response_model=GenerateResponse)
