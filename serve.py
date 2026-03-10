@@ -139,6 +139,22 @@ def load_model():
     model_instance.load_state_dict(state_dict)
     model_instance.eval()
     model_instance.to(DEVICE)
+
+    # Use half precision for faster CPU inference
+    if DEVICE == 'cpu':
+        try:
+            # bfloat16 is natively supported on modern CPUs and avoids float16 overflow issues
+            test = torch.tensor([1.0]).to(dtype=torch.bfloat16)
+            _ = test + test  # verify ops work
+            model_instance = model_instance.to(dtype=torch.bfloat16)
+            logger.info("Using bfloat16 for faster CPU inference")
+        except Exception:
+            try:
+                model_instance = model_instance.half()
+                logger.info("Using float16 for faster CPU inference")
+            except Exception:
+                logger.info("Staying with float32 (half precision not supported)")
+
     model = model_instance
 
     enc = tiktoken.get_encoding("gpt2")
@@ -389,6 +405,8 @@ async def generate(req: GenerateRequest, _key: str = Security(verify_api_key)):
     if eot_pos >= 0:
         generated_text = generated_text[:eot_pos]
 
+    tokens_per_sec = round(len(generated_ids) / (elapsed_ms / 1000), 1) if elapsed_ms > 0 else 0
+
     return GenerateResponse(
         text=generated_text.strip(),
         tokens_generated=len(generated_ids),
@@ -397,5 +415,6 @@ async def generate(req: GenerateRequest, _key: str = Security(verify_api_key)):
         model_info={
             'params': checkpoint_info.get('n_params', 0),
             'val_loss': checkpoint_info.get('best_val_loss', 0),
+            'tokens_per_sec': tokens_per_sec,
         },
     )
