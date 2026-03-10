@@ -27,6 +27,11 @@ from pydantic import BaseModel, Field
 
 from model import GPTConfig, GPT
 
+# Sanitize env vars: strip \r that Railway sometimes injects from copy-paste
+for _k, _v in list(os.environ.items()):
+    if '\r' in _v:
+        os.environ[_k] = _v.replace('\r', '')
+
 # API key authentication
 API_KEY = os.environ.get('API_KEY', '')
 api_key_header = APIKeyHeader(name='X-API-Key', auto_error=False)
@@ -231,7 +236,7 @@ class GenerateRequest(BaseModel):
     )
     temperature: float = Field(default=0.7, ge=0.1, le=2.0)
     top_k: int = Field(default=200, ge=1, le=500)
-    max_tokens: int = Field(default=200, ge=10, le=500)
+    max_tokens: int = Field(default=75, ge=10, le=500)
 
 
 class AskRequest(BaseModel):
@@ -385,6 +390,8 @@ async def generate(req: GenerateRequest, _key: str = Security(verify_api_key)):
     x = torch.tensor([token_ids], dtype=torch.long, device=DEVICE)
 
     # Generate (run in thread to avoid blocking the async event loop)
+    # 30s timeout ensures we always return before proxy/client timeouts
+    GENERATE_TIMEOUT = 30
     eot_token = enc.encode("<|endoftext|>", allowed_special={"<|endoftext|>"})[0]
 
     def _generate():
@@ -392,7 +399,13 @@ async def generate(req: GenerateRequest, _key: str = Security(verify_api_key)):
             return model.generate(x, req.max_tokens, temperature=req.temperature, top_k=req.top_k, eot_token=eot_token)
 
     start_time = time.time()
-    y = await asyncio.to_thread(_generate)
+    try:
+        y = await asyncio.wait_for(asyncio.to_thread(_generate), timeout=GENERATE_TIMEOUT)
+    except asyncio.TimeoutError:
+        raise HTTPException(
+            status_code=504,
+            detail=f'Generation timed out after {GENERATE_TIMEOUT}s. Try fewer max_tokens (current: {req.max_tokens}).'
+        )
 
     elapsed_ms = int((time.time() - start_time) * 1000)
 
