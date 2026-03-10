@@ -74,24 +74,30 @@ def _get_anthropic():
 
 def embed_query(query: str) -> list[float]:
     """Embed a query string."""
-    client = _get_openai()
-    resp = client.embeddings.create(model=EMBEDDING_MODEL, input=query)
-    return resp.data[0].embedding
+    try:
+        client = _get_openai()
+        resp = client.embeddings.create(model=EMBEDDING_MODEL, input=query)
+        return resp.data[0].embedding
+    except Exception as e:
+        raise RuntimeError(f"OpenAI embedding failed: {type(e).__name__}: {e}") from e
 
 
 def retrieve_chunks(query: str, top_k: int = TOP_K, source_filter: str = None) -> list[dict]:
     """Retrieve relevant chunks from Supabase pgvector."""
-    db = _get_supabase()
     query_embedding = embed_query(query)
 
-    # Use the match function
-    result = db.rpc('match_rag_chunks', {
-        'query_embedding': query_embedding,
-        'match_count': top_k,
-        'filter_source': source_filter,
-    }).execute()
-
-    return result.data or []
+    try:
+        db = _get_supabase()
+        result = db.rpc('match_rag_chunks', {
+            'query_embedding': query_embedding,
+            'match_count': top_k,
+            'filter_source': source_filter,
+        }).execute()
+        return result.data or []
+    except RuntimeError:
+        raise  # Re-raise embedding errors as-is
+    except Exception as e:
+        raise RuntimeError(f"Supabase retrieval failed: {type(e).__name__}: {e}") from e
 
 
 def generate_answer(query: str, chunks: list[dict], max_tokens: int = 1000) -> dict:
@@ -108,15 +114,15 @@ def generate_answer(query: str, chunks: list[dict], max_tokens: int = 1000) -> d
 
     context = '\n\n'.join(context_parts)
 
-    # Call Claude
-    client = _get_anthropic()
-    message = client.messages.create(
-        model='claude-sonnet-4-20250514',
-        max_tokens=max_tokens,
-        system=SYSTEM_PROMPT,
-        messages=[{
-            'role': 'user',
-            'content': f"""Retrieved context:
+    try:
+        client = _get_anthropic()
+        message = client.messages.create(
+            model='claude-sonnet-4-20250514',
+            max_tokens=max_tokens,
+            system=SYSTEM_PROMPT,
+            messages=[{
+                'role': 'user',
+                'content': f"""Retrieved context:
 
 {context}
 
@@ -125,10 +131,11 @@ def generate_answer(query: str, chunks: list[dict], max_tokens: int = 1000) -> d
 Question: {query}
 
 Answer based on the retrieved context above:"""
-        }],
-    )
-
-    answer = message.content[0].text
+            }],
+        )
+        answer = message.content[0].text
+    except Exception as e:
+        raise RuntimeError(f"Claude generation failed: {type(e).__name__}: {e}") from e
 
     return {
         'answer': answer,
@@ -152,7 +159,9 @@ def ask(query: str, top_k: int = TOP_K, source_filter: str = None, max_tokens: i
     query = sanitize_query(query)
 
     # 1. Retrieve relevant chunks
+    logger.info(f"RAG: embedding query ({len(query)} chars)...")
     chunks = retrieve_chunks(query, top_k=top_k, source_filter=source_filter)
+    logger.info(f"RAG: retrieved {len(chunks)} chunks")
 
     if not chunks:
         return {
@@ -163,4 +172,7 @@ def ask(query: str, top_k: int = TOP_K, source_filter: str = None, max_tokens: i
         }
 
     # 2. Generate grounded answer
-    return generate_answer(query, chunks, max_tokens=max_tokens)
+    logger.info(f"RAG: generating answer with Claude...")
+    result = generate_answer(query, chunks, max_tokens=max_tokens)
+    logger.info(f"RAG: done")
+    return result
